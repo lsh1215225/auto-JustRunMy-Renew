@@ -5,9 +5,9 @@ on:
   # 手动触发
   workflow_dispatch:
   
-  # 定时触发 (每2天凌晨1点)
+  # 定时触发 (每天凌晨1点)
   schedule:
-    - cron: '0 1 */2 * *'
+    - cron: '0 1 */1 * *'
 
 # 权限配置
 permissions:
@@ -71,7 +71,14 @@ jobs:
             echo "⚠️ 未配置代理，跳过 Hysteria2 安装"
           fi
 
-      # 步骤 6: 执行脚本
+      # 步骤 6: 随机延迟 0-10 分钟
+      - name: ⏳ 随机延迟
+        run: |
+          DELAY=$(( RANDOM % 601 ))
+          echo "💤 随机延迟 ${DELAY} 秒（最多 10 分钟）"
+          sleep $DELAY
+
+      # 步骤 7: 执行脚本
       - name: 🚀 运行续期脚本
         env:
           JUSTRUNMY_EMAIL: ${{ env.JUSTRUNMY_EMAIL }}
@@ -84,7 +91,7 @@ jobs:
           xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
             python justrunmy_renew.py
 
-      # 步骤 7: 上传截图
+      # 步骤 8: 上传截图
       - name: 📸 上传截图
         if: always()
         uses: actions/upload-artifact@v4
@@ -93,14 +100,14 @@ jobs:
           path: "*.png"
           retention-days: 7
 
-      # 步骤 8: 清理本地截图
+      # 步骤 9: 清理本地截图
       - name: 🧹 清理本地截图
         if: always()
         run: |
           rm -f *.png
           echo "✅ 本地截图已清理"
 
-      # 步骤 9: 提交执行时间到公开库
+      # 步骤 10: 提交执行时间到公开库
       - name: ⏱️ 提交执行时间
         if: always()
         run: |
@@ -118,7 +125,7 @@ jobs:
             echo "✅ 更改已推送"
           fi
 
-      # 步骤 10: 清理旧的工作流运行记录
+      # 步骤 11: 清理旧的工作流运行记录
       - name: 🧹 清理旧的工作流运行记录
         uses: Mattraks/delete-workflow-runs@v2
         with:
