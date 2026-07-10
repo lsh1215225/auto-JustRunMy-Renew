@@ -22,7 +22,7 @@
 
 JUSTRUNMY_EMAIL=abc@abc.com  
 JUSTRUNMY_PASSWORD=abc123  
-HY2_PROXY_URL=hy2://.......  
+HY2_PROXY_URL=hy2://.......  OR  SOCKS_PORT=socks5://.......
 TG_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRstuVWXyz  
 TG_CHAT_ID=123456789  
 
