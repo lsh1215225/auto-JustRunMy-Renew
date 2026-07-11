@@ -496,22 +496,50 @@ def renew(sb) -> bool:
     time.sleep(3)
 
     print("🖱️ 自动读取应用名称...")
-    try:
-        # 等待带有 font-semibold 的 h3 标签加载
-        sb.wait_for_element('h3.font-semibold', timeout=10)
-        # 从网页中抓取真实的名称并保存到全局变量
-        DYNAMIC_APP_NAME = sb.get_text('h3.font-semibold')
+
+    # ==================== 优化后的应用名称抓取 ====================
+    app_name = None
+    selectors = ['h3.font-semibold', 'h3', 'h3.text-xl', 'h3.text-lg', '.font-semibold', '.text-xl']
+    for sel in selectors:
+        try:
+            sb.wait_for_element(sel, timeout=12)
+            app_name = sb.get_text(sel)
+            if app_name and len(app_name.strip()) > 2:
+                break
+        except:
+            pass
+
+    # 如果还是没抓到，额外轮询 12 秒
+    if not app_name or len(app_name.strip()) <= 2:
+        print("⏳ 应用卡片加载中（额外等待 12 秒）...")
+        for _ in range(12):
+            time.sleep(1)
+            try:
+                for sel in selectors:
+                    app_name = sb.get_text(sel)
+                    if app_name and len(app_name.strip()) > 2:
+                        break
+            except:
+                pass
+            if app_name and len(app_name.strip()) > 2:
+                break
+
+    if app_name and len(app_name.strip()) > 2:
+        DYNAMIC_APP_NAME = app_name.strip()
         print(f"🎯 成功抓取到应用名称: {DYNAMIC_APP_NAME}")
-        
-        # 直接点击刚才抓取到的元素
-        sb.click('h3.font-semibold')
-        time.sleep(3)
-        print(f"📍 成功进入应用详情页: {sb.get_current_url()}")
-    except Exception as e:
-        print(f"❌ 找不到应用卡片: {e}")
+        try:
+            sb.click('h3.font-semibold')
+            time.sleep(3)
+            print(f"📍 成功进入应用详情页: {sb.get_current_url()}")
+        except Exception as e:
+            print(f"⚠️ 点击名称失败: {e}（将继续执行后续步骤）")
+    else:
+        print("❌ 找不到应用卡片！")
         sb.save_screenshot("renew_app_not_found.png")
-        send_tg_message("❌", "续期失败(找不到应用)", "未知")
+        DYNAMIC_APP_NAME = "未知应用"
+        send_tg_message("❌", "续期失败(找不到应用卡片)", "未知")
         return False
+    # ============================================================
 
     print("🖱️ 点击 Reset Timer 按钮...")
     try:
