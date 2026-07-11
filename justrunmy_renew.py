@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import os
@@ -11,9 +12,6 @@ import requests
 from typing import Optional
 from urllib.parse import urlparse, parse_qs, unquote
 from seleniumbase import SB
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 LOGIN_URL = "https://justrunmy.app/id/Account/Login"
 DOMAIN    = "justrunmy.app"
@@ -374,6 +372,26 @@ def _xdotool_click(x: int, y: int):
 # ============================================================
 #  人机验证处理
 # ============================================================
+def _click_turnstile(sb):
+    try:
+        coords = sb.execute_script(_COORDS_JS)
+    except Exception as e:
+        print(f"  ⚠️ 获取 Turnstile 坐标失败: {e}")
+        return
+    if not coords:
+        print("  ⚠️ 无法定位 Turnstile 坐标")
+        return
+    try:
+        wi = sb.execute_script(_WININFO_JS)
+    except Exception:
+        wi = {"sx": 0, "sy": 0, "oh": 800, "ih": 768}
+        
+    bar = wi["oh"] - wi["ih"]
+    ax  = coords["cx"] + wi["sx"]
+    ay  = coords["cy"] + wi["sy"] + bar
+    print(f"  🖱️ 物理级点击 Turnstile ({ax}, {ay})")
+    _xdotool_click(ax, ay)
+
 def handle_turnstile(sb) -> bool:
     print("🔍 处理 Cloudflare Turnstile 验证...")
     time.sleep(2)
