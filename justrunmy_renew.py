@@ -328,7 +328,7 @@ _WININFO_JS = """
 """
 
 # ============================================================
-#  底层输入工具
+#  底层输入工具与多重行为模拟引擎
 # ============================================================
 def js_fill_input(sb, selector: str, text: str):
     safe_text = text.replace('\\', '\\\\').replace('"', '\\"')
@@ -363,19 +363,64 @@ def _activate_window():
     except Exception:
         pass
 
-def _xdotool_click(x: int, y: int):
+def _xdotool_click(x: int, y: int, penetration_mode: bool = False):
+    """
+    底层模拟点击内核
+    penetration_mode 为 True 时激活底层击穿模式：模拟人类非线性滑动鼠标轨迹 + 物理长按延时松开
+    """
     _activate_window()
-    try:
-        subprocess.run(["xdotool", "mousemove", "--sync", str(x), str(y)], timeout=3, stderr=subprocess.DEVNULL)
-        time.sleep(0.15)
-        subprocess.run(["xdotool", "click", "1"], timeout=2, stderr=subprocess.DEVNULL)
-    except Exception:
-        os.system(f"xdotool mousemove {x} {y} click 1 2>/dev/null")
+    import random
+    
+    if penetration_mode:
+        print(f"  ⚡ [底层击穿模式激活] 正在为您模拟人类鼠标变速平滑轨迹滑动...")
+        try:
+            # 读取当前鼠标位置
+            res = subprocess.run(["xdotool", "getmouselocation", "--shell"], capture_output=True, text=True, timeout=2)
+            lines = res.stdout.strip().split("\n")
+            curr_x = int(lines[0].split("=")[1])
+            curr_y = int(lines[1].split("=")[1])
+        except Exception:
+            curr_x, curr_y = 0, 0
+
+        # 为目标坐标引入人类操作产生的微幅像素物理随机抖动
+        target_x = x + random.randint(-4, 4)
+        target_y = y + random.randint(-4, 4)
+
+        # 步进式非线性拟合滑动
+        steps = random.randint(15, 25)
+        for i in range(1, steps + 1):
+            t = i / steps
+            t = t * t * (3 - 2 * t)  # 人类特征：渐入渐出变速曲线优化
+            next_x = int(curr_x + (target_x - curr_x) * t + random.randint(-1, 1))
+            next_y = int(curr_y + (target_y - curr_y) * t + random.randint(-1, 1))
+            subprocess.run(["xdotool", "mousemove", str(next_x), str(next_y)], stderr=subprocess.DEVNULL)
+            time.sleep(random.uniform(0.01, 0.02))
+
+        # 终点校正与停顿
+        subprocess.run(["xdotool", "mousemove", str(target_x), str(target_y)], stderr=subprocess.DEVNULL)
+        time.sleep(random.uniform(0.12, 0.25))
+
+        # 拟真长按点击（按下 -> 产生真实接触时长 -> 弹起）
+        subprocess.run(["xdotool", "mousedown", "1"], stderr=subprocess.DEVNULL)
+        time.sleep(random.uniform(0.07, 0.16))
+        subprocess.run(["xdotool", "mouseup", "1"], stderr=subprocess.DEVNULL)
+        print(f"  🎯 击穿点击执行完毕，随机模拟坐标落点: ({target_x}, {target_y})")
+    else:
+        # 常规轻度伪装点击：直接位移但附带随机边缘像素点
+        rx = x + random.randint(-2, 2)
+        ry = y + random.randint(-2, 2)
+        print(f"  🖱️ 物理级常规点击 Turnstile 坐标: ({rx}, {ry})")
+        try:
+            subprocess.run(["xdotool", "mousemove", "--sync", str(rx), str(ry)], timeout=3, stderr=subprocess.DEVNULL)
+            time.sleep(random.uniform(0.1, 0.2))
+            subprocess.run(["xdotool", "click", "1"], timeout=2, stderr=subprocess.DEVNULL)
+        except Exception:
+            os.system(f"xdotool mousemove {rx} {ry} click 1 2>/dev/null")
 
 # ============================================================
 #  人机验证处理
 # ============================================================
-def _click_turnstile(sb):
+def _click_turnstile(sb, penetration_mode: bool = False):
     try:
         coords = sb.execute_script(_COORDS_JS)
     except Exception as e:
@@ -392,55 +437,44 @@ def _click_turnstile(sb):
     bar = wi["oh"] - wi["ih"]
     ax  = coords["cx"] + wi["sx"]
     ay  = coords["cy"] + wi["sy"] + bar
-    print(f"  🖱️ 物理级点击 Turnstile ({ax}, {ay})")
-    _xdotool_click(ax, ay)
+    
+    _xdotool_click(ax, ay, penetration_mode=penetration_mode)
 
 def handle_turnstile(sb) -> bool:
     print("🔍 处理 Cloudflare Turnstile 验证...")
+    import random
     time.sleep(2)
-
-    # 先尝试静默通过（部分页面支持）
+    
     if sb.execute_script(_SOLVED_JS):
         print("  ✅ 已静默通过")
         return True
 
-    # 展开 Turnstile（多次点击尝试）
     for _ in range(3):
-        try:
-            sb.execute_script(_EXPAND_JS)
-        except Exception:
-            pass
+        try: sb.execute_script(_EXPAND_JS)
+        except Exception: pass
         time.sleep(0.5)
 
-    # 自动检测并解决 Turnstile（SeleniumBase UC 模式内置人类点击 + 指纹模拟）
-    print("  🖱️ 自动点击 Turnstile 验证框...")
-    try:
-        sb.uc_gui_click_captcha()  # 专为 Turnstile 设计的自动点击 + 人类模拟
-        print("  ✅ Turnstile 自动通过")
-        return True
-    except Exception as e:
-        print(f"  ⚠️ 自动点击失败: {e}（重试中...）")
+    for attempt in range(6):
+        if sb.execute_script(_SOLVED_JS):
+            print(f"  ✅ Turnstile 通过（第 {attempt + 1} 次尝试）")
+            return True
+        try: sb.execute_script(_EXPAND_JS)
+        except Exception: pass
+        time.sleep(0.3)
+        
+        # 👑 击穿逻辑切换：前 2 次点击不成功时，从第 3 次开始自动全面激活“底层击穿模式”
+        penetration_mode = (attempt >= 2)
+        _click_turnstile(sb, penetration_mode=penetration_mode)
+        
+        # 散列轮询等待，随机化间歇，防频率审查
+        for _ in range(8):
+            time.sleep(random.uniform(0.4, 0.6))
+            if sb.execute_script(_SOLVED_JS):
+                print(f"  ✅ Turnstile 通过（第 {attempt + 1} 次尝试）")
+                return True
+        print(f"  ⚠️ 第 {attempt + 1} 次未通过，重试...")
 
-    # 备用手动坐标点击（保留原逻辑作为 fallback）
-    coords = sb.execute_script(_COORDS_JS)
-    if coords:
-        wi = sb.execute_script(_WININFO_JS)
-        bar = wi["oh"] - wi["ih"] if wi.get("oh") and wi.get("ih") else 0
-        ax = coords["cx"] + wi.get("sx", 0)
-        ay = coords["cy"] + wi.get("sy", 0) + bar
-        print(f"  🖱️ 物理级点击 Turnstile ({ax}, {ay})")
-        _xdotool_click(ax, ay)
-        time.sleep(3)
-
-    # 额外等待 + 验证
-    WebDriverWait(sb.driver, 10).until(
-        EC.text_to_be_present_in_element((By.XPATH, "//div[contains(@class, 'success')]"), "success")
-    )
-    if sb.execute_script(_SOLVED_JS):
-        print("  ✅ Turnstile 通过")
-        return True
-
-    print("  ❌ Turnstile 处理失败")
+    print("  ❌ Turnstile 6 次均失败")
     return False
 
 # ============================================================
@@ -511,19 +545,16 @@ def renew(sb) -> bool:
     print("   🚀 开始自动续期流程")
     print("="*50)
     
-    print("🌐 进入控制面板: https://justrunmy.app/panel/applications")
-    sb.open("https://justrunmy.app/panel/applications")
+    print("🌐 进入控制面板: https://justrunmy.app/panel")
+    sb.open("https://justrunmy.app/panel")
     time.sleep(3)
 
     print("🖱️ 自动读取应用名称...")
     try:
-        # 等待带有 font-semibold 的 h3 标签加载
         sb.wait_for_element('h3.font-semibold', timeout=10)
-        # 从网页中抓取真实的名称并保存到全局变量
         DYNAMIC_APP_NAME = sb.get_text('h3.font-semibold')
         print(f"🎯 成功抓取到应用名称: {DYNAMIC_APP_NAME}")
         
-        # 直接点击刚才抓取到的元素
         sb.click('h3.font-semibold')
         time.sleep(3)
         print(f"📍 成功进入应用详情页: {sb.get_current_url()}")
@@ -568,7 +599,6 @@ def renew(sb) -> bool:
     try:
         sb.refresh()
         time.sleep(4)
-        # 根据页面结构获取剩余时间文本
         timer_text = sb.get_text('span.font-mono.text-xl')
         print(f"⏱️ 当前应用剩余时间: {timer_text}")
         
@@ -593,35 +623,34 @@ def renew(sb) -> bool:
 # ============================================================
 def main():
     print("=" * 50)
-    print("   JustRunMy.app 自动登录与续期脚本")
+    print("   JustRunMy.app 自动登录与续期脚本 (SSH 动态直连升级版)")
     print("=" * 50)
 
-    # 启动 Hysteria2 代理（带重试），若未配置则直连
+    # 启动后台 SSH 隧道代理（带重试），若未配置则直连
     proxy_manager, proxy_url = start_proxy_with_retry(max_retries=5)
 
-    # 检查落地 IP
+    # 检查落地 IP 信息
     print(f"🔍 正在检查 IP 信息（使用代理: {bool(proxy_url)})...")
     ip_info = check_ip(proxy_url)
     print(f"🌐 IP 信息：{ip_info}")
 
-    # 写入全局变量，供 send_tg_message 使用
     global CURRENT_IP_INFO
     CURRENT_IP_INFO = ip_info
 
     sb_kwargs = {"uc": True, "test": True, "headless": False}
 
     if proxy_url:
-        print(f"🔗 挂载代理: {proxy_url}")
+        print(f"🔗 挂载隧道代理至浏览器后端: {proxy_url}")
         sb_kwargs["proxy"] = proxy_url
     else:
-        print("🌐 未使用代理，直连访问")
+        print("🌐 未配置安全隧道，正在使用默认 Actions 裸奔直连访问")
 
     try:
         with SB(**sb_kwargs) as sb:
-            print("✅ 浏览器已启动")
+            print("✅ 自动化安全浏览器已成功拉起")
             try:
                 sb.open("https://api.ipify.org/?format=json")
-                print(f"🌐 当前出口真实 IP: {sb.get_text('body')}")
+                print(f"🌐 浏览器端实测出口真实 IP: {sb.get_text('body')}")
             except Exception:
                 pass
 
