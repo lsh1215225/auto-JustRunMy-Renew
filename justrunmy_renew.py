@@ -24,13 +24,10 @@ PASSWORD     = os.environ.get("JUSTRUNMY_PASSWORD")
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID   = os.environ.get("TG_CHAT_ID")
 
-# SSH 代理直连配置
-SSH_HOST     = os.environ.get("SSH_HOST", "")
-SSH_PORT     = int(os.environ.get("SSH_PORT", "22"))
-SSH_USER     = os.environ.get("SSH_USER", "")
-SSH_PASS     = os.environ.get("SSH_PASS", "")
+# Hysteria2 代理 URL（可选）
+HY2_PROXY_URL = os.environ.get("HY2_PROXY_URL", "")
 
-# SOCKS5 代理端口（默认 51080）
+# SOCKS5 代理端口（可选，默认 51080）
 SOCKS_PORT = int(os.environ.get("SOCKS_PORT", "51080"))
 
 if not EMAIL or not PASSWORD:
@@ -45,93 +42,108 @@ DYNAMIC_APP_NAME = "未知应用"
 CURRENT_IP_INFO = "未知 IP"
 
 # ============================================================
-#  SSH 隧道直连代理模块
+#  Hysteria2 代理模块
 # ============================================================
-class SshProxy:
-    def __init__(self, host, port, user, password):
-        self.host = host
-        self.port = port
-        self.user = user
-        self.password = password
+class Hy2Proxy:
+    def __init__(self, url):
+        self.url = url
         self.proc = None
 
     def start(self):
-        if not self.host or not self.user:
-            print("⚠️ 未提供完整的 SSH 配置")
+        if not self.url:
+            print("⚠️ 未提供 HY2_PROXY_URL")
             return False
 
-        print(f"📡 正在建立 SSH 动态直连隧道 (SOCKS5 代理代理映射)...")
-        print(f"🔗 目标节点: {self.user}@{self.host}:{self.port}")
+        print("📡 启动 Hysteria2...")
 
-        # 使用 sshpass 配合 ssh -N -D 命令在后台静默建立隧道
-        cmd = [
-            "sshpass", "-p", self.password,
-            "ssh",
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "ConnectTimeout=15",
-            "-N", "-D", f"127.0.0.1:{SOCKS_PORT}",
-            "-p", str(self.port),
-            f"{self.user}@{self.host}"
-        ]
+        u = self.url.replace("hysteria2://", "").replace("hy2://", "")
+        parsed = urlparse("scheme://" + u)
+        params = parse_qs(parsed.query)
+
+        # 处理 IPv6 地址
+        hostname = parsed.hostname
+        port = parsed.port
+
+        # IPv6 地址需要用方括号包围
+        if hostname and ':' in hostname:
+            server = f"[{hostname}]:{port}"
+        else:
+            server = f"{hostname}:{port}"
+
+        cfg = {
+            "server": server,
+            "auth": unquote(parsed.username),
+            "tls": {
+                "sni": params.get("sni", [hostname])[0],
+                "insecure": params.get("insecure", ["0"])[0] == "1",
+                "alpn": params.get("alpn", ["h3"])[0],
+            },
+            "socks5": {"listen": f"127.0.0.1:{SOCKS_PORT}"}
+        }
+
+        path = "/tmp/hy2.json"
+        with open(path, "w") as f:
+            json.dump(cfg, f)
 
         self.proc = subprocess.Popen(
-            cmd,
+            ["hysteria", "client", "-c", path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
             text=True
         )
 
-        # 循环检测本地转发端口是否成功开放就绪
         for _ in range(30):
             time.sleep(1)
             with socket.socket() as s:
                 if s.connect_ex(("127.0.0.1", SOCKS_PORT)) == 0:
-                    print("✅ SSH 动态直连隧道已就绪！")
+                    print("✅ HY2 已就绪")
                     break
         else:
-            print("❌ SSH 隧道启动失败或超时，请检查您的主机 Secrets 配置以及网络连通性。")
+            print("❌ HY2 启动失败")
             try:
                 _, stderr = self.proc.communicate(timeout=1)
                 if stderr:
-                    print(f"SSH 错误信息: {stderr}")
+                    print(f"HY2 错误: {stderr}")
             except Exception:
                 pass
             return False
 
-        time.sleep(2)
+        time.sleep(3)
         return True
 
     def stop(self):
         if self.proc:
-            try:
-                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
-                print("🛑 SSH 隧道已安全关闭")
-            except Exception:
-                pass
+            os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+            print("🛑 HY2 已停止")
 
     @property
     def proxy(self):
         return f"socks5://127.0.0.1:{SOCKS_PORT}"
 
 
-def get_proxy_manager() -> Optional[SshProxy]:
-    """根据环境变量判断是否需要启动并挂载 SSH 隧道代理"""
-    if SSH_HOST and SSH_USER:
-        return SshProxy(SSH_HOST, SSH_PORT, SSH_USER, SSH_PASS)
+def get_proxy_manager() -> Optional[Hy2Proxy]:
+    """
+    根据环境变量判断是否需要使用代理
+    支持的环境变量：
+      - HY2_PROXY_URL: Hysteria2 代理 URL
+    返回代理管理器或 None
+    """
+    if HY2_PROXY_URL:
+        return Hy2Proxy(HY2_PROXY_URL)
     return None
 
 
 def mask_ip(ip: str) -> str:
     """脱敏 IP 地址"""
-    if not ip or "." not in ip:
-        return ip
     return ip.rsplit(".", 1)[0] + ".***"
 
 
 def mask_email(email: str) -> str:
-    """脱敏邮箱地址"""
+    """
+    脱敏邮箱地址，保留首尾字母，中间用 * 代替，@ 及后面不脱敏
+    例: user@example.com -> u***r@example.com
+    """
     if "@" not in email:
         if len(email) <= 2:
             return email
@@ -157,16 +169,20 @@ def check_ip(proxy: Optional[str] = None) -> str:
         ).json()
         if r.get("status") == "success":
             ip_str = f"{mask_ip(r['query'])} ({r['countryCode']})"
-            mode = "✅ SSH 代理" if proxy else "⚠️ 直连"
+            mode = "✅ 代理" if proxy else "⚠️ 直连"
             return f"{ip_str} [{mode}]"
     except Exception:
         pass
-    mode = "✅ SSH 代理" if proxy else "⚠️ 直连"
+    mode = "✅ 代理" if proxy else "⚠️ 直连"
     return f"未知 IP [{mode}]"
 
 
 def start_proxy_with_retry(max_retries=3):
-    """启动代理，失败时重试"""
+    """
+    启动代理，失败时重试
+    参数: max_retries - 最大重试次数（默认 3 次）
+    返回: (proxy_manager, proxy_url) 或 (None, None)
+    """
     proxy_manager = get_proxy_manager()
     proxy_url = None
 
@@ -174,17 +190,17 @@ def start_proxy_with_retry(max_retries=3):
         return None, None
 
     for attempt in range(1, max_retries + 1):
-        print(f"🔄 尝试启动 SSH 动态隧道 ({attempt}/{max_retries})...")
+        print(f"🔄 尝试启动代理 ({attempt}/{max_retries})...")
         if proxy_manager.start():
             proxy_url = proxy_manager.proxy
-            print(f"✅ 代理已成功挂载：{proxy_url}")
+            print(f"✅ 代理已启动：{proxy_url}")
             return proxy_manager, proxy_url
         else:
             if attempt < max_retries:
                 print(f"⏳ 等待 5 秒后重试...")
                 time.sleep(5)
             else:
-                print("⚠️ SSH 隧道多次启动失败，继续使用默认环境直连模式。")
+                print("⚠️ 代理启动失败，继续使用直连模式")
 
     return None, None
 
@@ -197,12 +213,15 @@ def send_tg_message(status_icon, status_text, time_left):
         print("ℹ️ 未配置 TG_BOT_TOKEN 或 TG_CHAT_ID，跳过 Telegram 推送。")
         return
 
+    # 获取北京时间 (UTC+8)
     local_time = time.gmtime(time.time() + 8 * 3600)
     current_time_str = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
 
+    # 脱敏邮箱，构造账号超链接
     masked = mask_email(EMAIL)
     account_line = f"<a href='tg://user?id={TG_CHAT_ID}'>{masked}</a>"
 
+    # 按照格式拼接消息，动态注入抓取到的应用名称
     text = (
         f"🎮 justrunmy.app 续期报告\n🖥 {DYNAMIC_APP_NAME}\n"
         f"👤 账号: {account_line}\n"
