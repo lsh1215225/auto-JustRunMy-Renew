@@ -12,6 +12,9 @@ import requests
 from typing import Optional
 from urllib.parse import urlparse, parse_qs, unquote
 from seleniumbase import SB
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 LOGIN_URL = "https://justrunmy.app/id/Account/Login"
 DOMAIN    = "justrunmy.app"
@@ -450,6 +453,7 @@ def handle_turnstile(sb) -> bool:
         try: sb.execute_script(_EXPAND_JS)
         except Exception: pass
         time.sleep(0.5)
+
     # 自动检测并解决 Turnstile（SeleniumBase UC 模式内置人类点击 + 指纹模拟）
     print("  🖱️ 自动点击 Turnstile 验证框...")
     try:
@@ -458,7 +462,7 @@ def handle_turnstile(sb) -> bool:
         return True
     except Exception as e:
         print(f"  ⚠️ 自动点击失败: {e}（重试中...）")
-
+        
     # 备用手动坐标点击（保留原逻辑作为 fallback）
     coords = sb.execute_script(_COORDS_JS)
     if coords:
@@ -469,14 +473,6 @@ def handle_turnstile(sb) -> bool:
         print(f"  🖱️ 物理级点击 Turnstile ({ax}, {ay})")
         _xdotool_click(ax, ay)
         time.sleep(3)
-
-    # 额外等待 + 验证
-    WebDriverWait(sb.driver, 10).until(
-        EC.text_to_be_present_in_element((By.XPATH, "//div[contains(@class, 'success')]"), "success")
-    )
-    if sb.execute_script(_SOLVED_JS):
-        print("  ✅ Turnstile 通过")
-        return True
 
     for attempt in range(6):
         if sb.execute_script(_SOLVED_JS):
