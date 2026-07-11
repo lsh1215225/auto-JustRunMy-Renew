@@ -497,32 +497,60 @@ def renew(sb) -> bool:
 
     print("🖱️ 自动读取应用名称...")
 
-    # ==================== 优化后的应用名称抓取 ====================
+    # ==================== 超强应用名称抓取（包含 Sign In 页面）===================
     app_name = None
-    selectors = ['h3.font-semibold', 'h3', 'h3.text-xl', 'h3.text-lg', '.font-semibold', '.text-xl']
+    selectors = [
+        # 应用详情页常用
+        'h3.font-semibold',
+        'h3',
+        'h3.text-xl',
+        'h3.text-lg',
+        '.font-semibold',
+        '.text-xl',
+        # 登录/首页应用卡片（最重要！支持 Sign In 页面）
+        '[data-testid="app-card"]',
+        '.app-card',
+        '.application-card',
+        '[class*="app-card"]',
+        '[class*="application"]',
+        'a[href*="/app/"]',
+        'a[href*="/panel/"]',
+        # 后备：点击任意包含"sign in"或应用名称的链接
+        'a:contains("Sign In")',
+        'a:contains("sign in")',
+        'a:contains("SignIn")',
+    ]
+    
     for sel in selectors:
         try:
-            sb.wait_for_element(sel, timeout=12)
+            sb.wait_for_element(sel, timeout=30)
             app_name = sb.get_text(sel)
             if app_name and len(app_name.strip()) > 2:
+                print(f"🎯 成功抓取到应用名称: {app_name}")
+                # 自动点击（详情页直接点，登录页点击链接跳转）
+                try:
+                    sb.click(sel)
+                    time.sleep(4)
+                except Exception:
+                    pass
                 break
         except:
             pass
 
-    # 如果还是没抓到，额外轮询 12 秒
+    # 如果抓不到，尝试额外方式（最坏情况）
     if not app_name or len(app_name.strip()) <= 2:
-        print("⏳ 应用卡片加载中（额外等待 12 秒）...")
-        for _ in range(12):
-            time.sleep(1)
+        print("⏳ 未找到标准应用名称，尝试点击应用卡片跳转...")
+        for sel in ['a[href*="/app/"]', 'a[href*="/panel/"]', '[data-testid*="app"]']:
             try:
-                for sel in selectors:
-                    app_name = sb.get_text(sel)
-                    if app_name and len(app_name.strip()) > 2:
-                        break
+                sb.wait_for_element(sel, timeout=5)
+                sb.click(sel)
+                time.sleep(4)
+                if sb.get_current_url().split('/')[-1] not in ['panel', 'login']:
+                    app_name = "已进入应用详情页"
+                    print(f"✅ 已成功点击应用卡片，当前 URL: {sb.get_current_url()}")
+                    break
             except:
                 pass
-            if app_name and len(app_name.strip()) > 2:
-                break
 
     if app_name and len(app_name.strip()) > 2:
         DYNAMIC_APP_NAME = app_name.strip()
@@ -542,14 +570,56 @@ def renew(sb) -> bool:
     # ============================================================
 
     print("🖱️ 点击 Reset Timer 按钮...")
-    try:
-        sb.click('button:contains("Reset Timer")')
-        time.sleep(3)
-    except Exception as e:
-        print(f"❌ 找不到 Reset Timer 按钮: {e}")
+
+    # ==================== 超强 Reset Timer 按钮查找 ====================
+    reset_btn = None
+    btn_selectors = [
+        'button:contains("Reset Timer")',
+        'button:contains("Reset Timer")',
+        '[data-testid*="reset"]',
+        '[data-testid*="timer"]',
+        'button',
+        'div[role="button"]',
+        'a:contains("Reset")'
+    ]
+    
+    for sel in btn_selectors:
+        try:
+            sb.wait_for_element(sel, timeout=15)
+            reset_btn = sel
+            print(f"✅ 找到 Reset Timer 按钮: {sel}")
+            break
+        except:
+            pass
+
+    # 额外轮询（防止页面加载延迟）
+    if not reset_btn:
+        print("⏳ Reset Timer 加载中（额外轮询 20 秒）...")
+        for _ in range(20):
+            time.sleep(1)
+            for sel in btn_selectors:
+                try:
+                    sb.wait_for_element(sel, timeout=3)
+                    reset_btn = sel
+                    print(f"✅ 找到 Reset Timer 按钮: {sel}")
+                    break
+                except:
+                    pass
+            if reset_btn:
+                break
+
+    if reset_btn:
+        try:
+            sb.click(reset_btn)
+            time.sleep(3)
+        except Exception as e:
+            print(f"⚠️ 点击按钮失败: {e}（将继续执行后续步骤）")
+    else:
+        print("❌ 找不到 Reset Timer 按钮！")
         sb.save_screenshot("renew_reset_btn_not_found.png")
         send_tg_message("❌", "续期失败(找不到按钮)", "未知")
         return False
+    # ============================================================
 
     print("🛡️ 检查续期弹窗内是否需要 CF 验证...")
     if sb.execute_script(_EXISTS_JS):
