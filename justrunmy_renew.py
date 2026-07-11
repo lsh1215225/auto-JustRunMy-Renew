@@ -12,6 +12,9 @@ import requests
 from typing import Optional
 from urllib.parse import urlparse, parse_qs, unquote
 from seleniumbase import SB
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 LOGIN_URL = "https://justrunmy.app/id/Account/Login"
 DOMAIN    = "justrunmy.app"
@@ -372,57 +375,52 @@ def _xdotool_click(x: int, y: int):
 # ============================================================
 #  人机验证处理
 # ============================================================
-def _click_turnstile(sb):
-    try:
-        coords = sb.execute_script(_COORDS_JS)
-    except Exception as e:
-        print(f"  ⚠️ 获取 Turnstile 坐标失败: {e}")
-        return
-    if not coords:
-        print("  ⚠️ 无法定位 Turnstile 坐标")
-        return
-    try:
-        wi = sb.execute_script(_WININFO_JS)
-    except Exception:
-        wi = {"sx": 0, "sy": 0, "oh": 800, "ih": 768}
-        
-    bar = wi["oh"] - wi["ih"]
-    ax  = coords["cx"] + wi["sx"]
-    ay  = coords["cy"] + wi["sy"] + bar
-    print(f"  🖱️ 物理级点击 Turnstile ({ax}, {ay})")
-    _xdotool_click(ax, ay)
-
 def handle_turnstile(sb) -> bool:
     print("🔍 处理 Cloudflare Turnstile 验证...")
     time.sleep(2)
-    
+
+    # 先尝试静默通过（部分页面支持）
     if sb.execute_script(_SOLVED_JS):
         print("  ✅ 已静默通过")
         return True
 
+    # 展开 Turnstile（多次点击尝试）
     for _ in range(3):
-        try: sb.execute_script(_EXPAND_JS)
-        except Exception: pass
+        try:
+            sb.execute_script(_EXPAND_JS)
+        except Exception:
+            pass
         time.sleep(0.5)
 
-    for attempt in range(6):
-        if sb.execute_script(_SOLVED_JS):
-            print(f"  ✅ Turnstile 通过（第 {attempt + 1} 次尝试）")
-            return True
-        try: sb.execute_script(_EXPAND_JS)
-        except Exception: pass
-        time.sleep(0.3)
-        
-        _click_turnstile(sb)
-        
-        for _ in range(8):
-            time.sleep(0.5)
-            if sb.execute_script(_SOLVED_JS):
-                print(f"  ✅ Turnstile 通过（第 {attempt + 1} 次尝试）")
-                return True
-        print(f"  ⚠️ 第 {attempt + 1} 次未通过，重试...")
+    # 自动检测并解决 Turnstile（SeleniumBase UC 模式内置人类点击 + 指纹模拟）
+    print("  🖱️ 自动点击 Turnstile 验证框...")
+    try:
+        sb.uc_gui_click_captcha()  # 专为 Turnstile 设计的自动点击 + 人类模拟
+        print("  ✅ Turnstile 自动通过")
+        return True
+    except Exception as e:
+        print(f"  ⚠️ 自动点击失败: {e}（重试中...）")
 
-    print("  ❌ Turnstile 6 次均失败")
+    # 备用手动坐标点击（保留原逻辑作为 fallback）
+    coords = sb.execute_script(_COORDS_JS)
+    if coords:
+        wi = sb.execute_script(_WININFO_JS)
+        bar = wi["oh"] - wi["ih"] if wi.get("oh") and wi.get("ih") else 0
+        ax = coords["cx"] + wi.get("sx", 0)
+        ay = coords["cy"] + wi.get("sy", 0) + bar
+        print(f"  🖱️ 物理级点击 Turnstile ({ax}, {ay})")
+        _xdotool_click(ax, ay)
+        time.sleep(3)
+
+    # 额外等待 + 验证
+    WebDriverWait(sb.driver, 10).until(
+        EC.text_to_be_present_in_element((By.XPATH, "//div[contains(@class, 'success')]"), "success")
+    )
+    if sb.execute_script(_SOLVED_JS):
+        print("  ✅ Turnstile 通过")
+        return True
+
+    print("  ❌ Turnstile 处理失败")
     return False
 
 # ============================================================
