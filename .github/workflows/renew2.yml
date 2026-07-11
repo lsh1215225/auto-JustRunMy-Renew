@@ -1,0 +1,136 @@
+name: JustRunMy 自动续期2
+
+# 触发条件
+on:
+  # 手动触发
+  workflow_dispatch:
+  
+  # 定时触发 (每天凌晨1点)
+  schedule:
+    - cron: '0 1 */1 * *'
+
+# 权限配置
+permissions:
+  contents: write
+  actions: write
+
+# 工作流任务
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # ========== Secrets 配置 ==========
+      JUSTRUNMY_EMAIL: ${{ secrets.JUSTRUNMY_EMAIL }}
+      JUSTRUNMY_PASSWORD: ${{ secrets.JUSTRUNMY_PASSWORD }}
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      HY2_PROXY_URL: ${{ secrets.HY2_PROXY_URL }}
+      SOCKS_PORT: ${{ secrets.SOCKS_PORT || '51080' }}
+      
+      # ========== 项目配置 ==========
+      SCREENSHOT_DIR: screenshots
+    
+    steps:
+      # 步骤 1: 检出代码
+      - name: 📥 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # 步骤 2: 设置 Python 环境
+      - name: 🐍 设置 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      # 步骤 3: 安装系统依赖
+      - name: 📦 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool scrot fonts-noto-cjk
+
+      # 步骤 4: 安装 Python 依赖
+      - name: 📚 安装 Python 依赖
+        run: |
+          pip install --upgrade pip
+          pip install seleniumbase aiohttp requests
+
+      # 步骤 5: 安装 Hysteria2（如果需要代理）
+      - name: 📡 安装 Hysteria2
+        run: |
+          if [ -n "${{ env.HY2_PROXY_URL }}" ]; then
+            echo "安装 Hysteria2..."
+            curl -L -o hysteria \
+              https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
+            chmod +x hysteria
+            sudo mv hysteria /usr/local/bin/hysteria
+            hysteria version
+            echo "✅ Hysteria2 安装完成"
+          else
+            echo "⚠️ 未配置代理，跳过 Hysteria2 安装"
+          fi
+
+      # 步骤 6: 随机延迟 0-10 分钟
+      - name: ⏳ 随机延迟
+        run: |
+          DELAY=$(( RANDOM % 601 ))
+          echo "💤 随机延迟 ${DELAY} 秒（最多 10 分钟）"
+          sleep $DELAY
+
+      # 步骤 7: 执行脚本
+      - name: 🚀 运行续期脚本
+        env:
+          JUSTRUNMY_EMAIL: ${{ env.JUSTRUNMY_EMAIL }}
+          JUSTRUNMY_PASSWORD: ${{ env.JUSTRUNMY_PASSWORD }}
+          TG_BOT_TOKEN: ${{ env.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ env.TG_CHAT_ID }}
+          HY2_PROXY_URL: ${{ env.HY2_PROXY_URL }}
+          SOCKS_PORT: ${{ env.SOCKS_PORT }}
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
+            python justrunmy_renew.py
+
+      # 步骤 8: 上传截图
+      - name: 📸 上传截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.run_id }}
+          path: "*.png"
+          retention-days: 7
+
+      # 步骤 9: 清理本地截图
+      - name: 🧹 清理本地截图
+        if: always()
+        run: |
+          rm -f *.png
+          echo "✅ 本地截图已清理"
+
+      # 步骤 10: 提交执行时间到公开库
+      - name: ⏱️ 提交执行时间
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p justrunmy && echo "$(date +'%Y-%m-%d %H:%M:%S')" > justrunmy/time.txt
+          git add justrunmy/time.txt 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "无变化，无需提交"
+          else
+            TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S')
+            git commit -m "⏱️ 更新执行时间: $TIMESTAMP"
+            git fetch origin main
+            git push -f origin HEAD:main
+            echo "✅ 更改已推送"
+          fi
+
+      # 步骤 11: 清理旧的工作流运行记录
+      - name: 🧹 清理旧的工作流运行记录
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: ${{ github.workflow }}
+          retain_days: 0
+          keep_minimum_runs: 3
