@@ -89,7 +89,7 @@ jobs:
           SOCKS_PORT: ${{ env.SOCKS_PORT }}
         run: |
           xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
-            python justrunmy_renew.py
+            python justrunmy_renew2.py
 
       # 步骤 8: 上传截图
       - name: 📸 上传截图
