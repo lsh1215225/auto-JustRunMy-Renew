@@ -508,8 +508,8 @@ def renew(sb) -> bool:
     print("   🚀 开始自动续期流程")
     print("="*50)
     
-    print("🌐 进入控制面板: https://justrunmy.app/panel")
-    sb.open("https://justrunmy.app/panel")
+    print("🌐 进入控制面板: https://justrunmy.app/panel/applications")
+    sb.open("https://justrunmy.app/panel/applications")
     time.sleep(3)
 
     print("🖱️ 自动读取应用名称...")
